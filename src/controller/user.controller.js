@@ -1,9 +1,82 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
+import { User } from "../models/user.model.js";
+import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
 
-const registerUser = asyncHandler( async (req, res) => {
-     res.status(200).json({
-        message: "chai aur code"
-    })
-})
+const registerUser = asyncHandler(async (req, res) => {
+  // get user details from front end
+  // validation on data for user
+  // chekc if user already exists
+  // check for images, check for avatar
+  // upload them to cloudinary, avatar
+  // create user object/payload => creation call in db
+  // remove password and refresg token from response
+  // check for user creation
+  // return response
+  const { fullName, email, username, password } = req.body;
+  const validateFields = [fullName, email, username, password];
+  const isDataInvalid = validateFields.some(
+    (field) => !field || field.trim() === ""
+  );
+
+  if (isDataInvalid) {
+    throw new ApiError(
+      400,
+      "Validation failed: Fields cannot be empty or contain only whitespace."
+    );
+  }
+
+  const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+
+  if (existingUser) {
+    throw new ApiError(409, "User with email or username already exists");
+  }
+
+  const avatarLocalPath = req.files?.avatar[0]?.path;
+  //   const coverImageLocalPath = req.files?.coverImage[0]?.path;
+
+  let coverImageLocalPath;
+  if (
+    req.files &&
+    Array.isArray(req.files?.coverImage) &&
+    req.files?.coverImage.length > 0
+  ) {
+    coverImageLocalPath = req.files?.coverImage[0].path;
+  }
+
+  if (!avatarLocalPath) {
+    throw new ApiError(400, "Avatar is required");
+  }
+
+  const avatar = await uploadOnCloudinary(avatarLocalPath);
+  const coverImage = await uploadOnCloudinary(coverImageLocalPath);
+
+  if (!avatar) {
+    throw new ApiError(400, "Avatar file is required");
+  }
+
+  const payload = {
+    fullName,
+    avatar: avatar.url,
+    coverImage: coverImage?.url || "",
+    username: username.toLowerCase(),
+    email,
+    password,
+  };
+
+  const user = await User.create(payload);
+  const createdUser = await User.findById(user._id).select(
+    "-password -refreshToken"
+  );
+
+  if (!createdUser) {
+    throw new ApiError(404, "Something went wrong while creating user");
+  }
+
+  return res
+    .status(201)
+    .json(new ApiResponse(200, createdUser, "User registered successfully"));
+});
 
 export { registerUser };
